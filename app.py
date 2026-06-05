@@ -5,23 +5,20 @@ from streamlit_gsheets import GSheetsConnection
 
 # 1. 페이지 기본 설정
 st.set_page_config(page_title="새빛 LED ERP", page_icon="💡", layout="wide")
-st.title("(주)새빛 LED ERP 시스템")
-st.markdown("빛으로 세상과 소통하다 (주)새빛)")
+st.title("(주)새빛 LED 맞춤형 ERP 시스템")
+st.markdown("빛으로 세상과 소통하다 (주)새빛")
 
-# 2. 구글 스프레드시트 연결 설정 (★본인의 구글 시트 주소로 교체하세요★)
-URL = "https://docs.google.com/spreadsheets/d/1bj7YfBAjHtwt-aeVrM29odhDxbcJowwwDZEiLA-_2Jg/edit?usp=sharing"
-
+# 2. 구글 스프레드시트 연결 (Streamlit Secrets 설정을 자동으로 읽어옵니다)
 try:
     conn = st.connection("gsheets", type=GSheetsConnection)
 except Exception as e:
-    st.error("구글 시트 연결 설정 중 오류가 발생했습니다. 주소를 확인해주세요.")
+    st.error("구글 시트 인증 설정 중 오류가 발생했습니다. Secrets 설정을 확인해주세요.")
 
-# 데이터 불러오기 함수 (캐시를 지워 실시간 반영)
+# 데이터 불러오기 함수
 def load_data(worksheet_name):
     try:
-        return conn.read(spreadsheet=URL, worksheet=worksheet_name, ttl=0)
+        return conn.read(worksheet=worksheet_name, ttl=0)
     except Exception:
-        # 시트가 비어있거나 오류 시 빈 데이터프레임 반환
         return pd.DataFrame()
 
 orders_df = load_data("orders")
@@ -37,7 +34,6 @@ if menu == "대시보드 (정산)":
     st.header("📊 월별 손익 및 프로젝트별 마진율 현황")
     
     if not orders_df.empty and not expenses_df.empty:
-        # 금액 데이터 숫자형 변환
         orders_df["수주금액"] = pd.to_numeric(orders_df["수주금액"], errors='coerce').fillna(0)
         expenses_df["지출금액"] = pd.to_numeric(expenses_df["지출금액"], errors='coerce').fillna(0)
         
@@ -54,7 +50,6 @@ if menu == "대시보드 (정산)":
         p_reports = []
         for _, order in orders_df.iterrows():
             p_code = order["프로젝트코드"]
-            # 해당 프로젝트의 지출 합산
             p_cost = expenses_df[expenses_df["프로젝트코드"] == p_code]["지출금액"].sum()
             p_margin = order["수주금액"] - p_cost
             margin_rate = (p_margin / order["수주금액"]) * 100 if order["수주금액"] > 0 else 0
@@ -69,7 +64,7 @@ if menu == "대시보드 (정산)":
             })
         st.dataframe(pd.DataFrame(p_reports), use_container_width=True)
     else:
-        st.info("등록된 수주 또는 지출 데이터가 없어 대시보드를 표시할 수 없습니다. 데이터를 먼저 입력해주세요.")
+        st.info("등록된 데이터가 부족하여 대시보드를 표시할 수 없습니다.")
 
 # ----------------------------------------------------
 # 메뉴 2: 수주/매출 등록 및 관리
@@ -97,13 +92,13 @@ elif menu == "수주/매출 등록 및 관리":
                         "수주금액": price, "계약일": str(order_date), "진행상태": status, "수금여부": payment
                     }])
                     updated_df = pd.concat([orders_df, new_data], ignore_index=True)
-                    conn.update(spreadsheet=URL, worksheet="orders", data=updated_df)
-                    st.success("구글 스프레드시트에 새로운 수주 건이 안전하게 저장되었습니다!")
+                    conn.update(worksheet="orders", data=updated_df)
+                    st.success("새로운 수주 건이 안전하게 저장되었습니다!")
                     st.rerun()
                 else:
                     st.error("프로젝트 코드와 발주처 명은 필수 입력 항목입니다.")
 
-    st.subheader("📑 수주 관리 대장 (실시간 구글 시트 연동)")
+    st.subheader("📑 수주 관리 대장")
     st.dataframe(orders_df, use_container_width=True)
 
 # ----------------------------------------------------
@@ -120,7 +115,6 @@ elif menu == "매입/지출 등록 및 관리":
             detail = col1.text_input("상세 지출 내역")
             amount = col2.number_input("지출 금액 (원)", min_value=0, step=1000)
             
-            # 수주된 프로젝트 코드 목록 가져오기
             p_codes = ["공통지출"]
             if not orders_df.empty:
                 p_codes += orders_df["프로젝트코드"].dropna().tolist()
@@ -135,11 +129,11 @@ elif menu == "매입/지출 등록 및 관리":
                         "지출금액": amount, "프로젝트코드": p_match
                     }])
                     updated_df = pd.concat([expenses_df, new_expense], ignore_index=True)
-                    conn.update(spreadsheet=URL, worksheet="expenses", data=updated_df)
-                    st.success("구글 스프레드시트에 지출 내역이 안전하게 저장되었습니다!")
+                    conn.update(worksheet="expenses", data=updated_df)
+                    st.success("지출 내역이 안전하게 저장되었습니다!")
                     st.rerun()
                 else:
                     st.error("상세 내역을 적고 지출 금액을 입력해주세요.")
 
-    st.subheader("📑 지출/매입 관리 대장 (실시간 구글 시트 연동)")
+    st.subheader("📑 지출/매입 관리 대장")
     st.dataframe(expenses_df, use_container_width=True)
