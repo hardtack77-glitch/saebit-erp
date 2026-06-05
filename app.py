@@ -1,25 +1,31 @@
 import streamlit as st
 import pandas as pd
 import datetime
+from streamlit_gsheets import GSheetsConnection
 
 # 1. 페이지 기본 설정
 st.set_page_config(page_title="새빛 LED ERP", page_icon="💡", layout="wide")
-st.title("💡 새빛 LED 맞춤형 ERP 시스템")
-st.markdown("대구 대명동 소규모 주문제작형 제조업 전용 (재고 없는 모델)")
+st.title("(주)새빛 LED ERP 시스템")
+st.markdown("빛으로 세상과 소통하다 (주)새빛)")
 
-# 2. 가상의 데이터베이스 초기화 (실제 운영 시 파일이나 DB 연동 필요)
-if 'orders' not in st.session_state:
-    st.session_state.orders = pd.DataFrame([
-        {"프로젝트코드": "P-260601", "발주처": "(주)대구건설", "품목/사양": "옥외 전광판 5m", "수주금액": 5000000, "계약일": datetime.date(2026, 6, 1), "진행상태": "제작중", "수금여부": "미수금"},
-        {"프로젝트코드": "P-260602", "발주처": "대명상가", "품목/사양": "실내 LED 간판", "수주금액": 1200000, "계약일": datetime.date(2026, 6, 2), "진행상태": "납품완료", "수금여부": "완납"}
-    ])
+# 2. 구글 스프레드시트 연결 설정 (★본인의 구글 시트 주소로 교체하세요★)
+URL = "https://docs.google.com/spreadsheets/d/1bj7YfBAjHtwt-aeVrM29odhDxbcJowwwDZEiLA-_2Jg/edit?usp=sharing"
 
-if 'expenses' not in st.session_state:
-    st.session_state.expenses = pd.DataFrame([
-        {"지출일자": datetime.date(2026, 6, 3), "구분": "부품구입", "상세내역": "LED 모듈 및 SMPS", "지출금액": 1500000, "프로젝트코드": "P-260601"},
-        {"지출일자": datetime.date(2026, 6, 4), "구분": "인건비", "상세내역": "외주 설치 기사 일당", "지출금액": 300000, "프로젝트코드": "P-260601"},
-        {"지출일자": datetime.date(2026, 6, 5), "구분": "운영비", "상세내역": "6월 사무실 임대료", "지출금액": 800000, "프로젝트코드": "공통지출"}
-    ])
+try:
+    conn = st.connection("gsheets", type=GSheetsConnection)
+except Exception as e:
+    st.error("구글 시트 연결 설정 중 오류가 발생했습니다. 주소를 확인해주세요.")
+
+# 데이터 불러오기 함수 (캐시를 지워 실시간 반영)
+def load_data(worksheet_name):
+    try:
+        return conn.read(spreadsheet=URL, worksheet=worksheet_name, ttl=0)
+    except Exception:
+        # 시트가 비어있거나 오류 시 빈 데이터프레임 반환
+        return pd.DataFrame()
+
+orders_df = load_data("orders")
+expenses_df = load_data("expenses")
 
 # 사이드바 메뉴 구성
 menu = st.sidebar.radio("메뉴 선택", ["대시보드 (정산)", "수주/매출 등록 및 관리", "매입/지출 등록 및 관리"])
@@ -30,32 +36,40 @@ menu = st.sidebar.radio("메뉴 선택", ["대시보드 (정산)", "수주/매�
 if menu == "대시보드 (정산)":
     st.header("📊 월별 손익 및 프로젝트별 마진율 현황")
     
-    total_sales = st.session_state.orders["수주금액"].sum()
-    total_expenses = st.session_state.expenses["지출금액"].sum()
-    net_profit = total_sales - total_expenses
-    
-    col1, col2, col3 = st.columns(3)
-    col1.metric("총 수주(매출) 금액", f"{total_sales:,.0f} 원")
-    col2.metric("총 매입(지출) 금액", f"{total_expenses:,.0f} 원")
-    col3.metric("당기 순이익", f"{net_profit:,.0f} 원")
-    
-    st.subheader("📋 프로젝트별 원가 및 마진 분석")
-    p_reports = []
-    for _, order in st.session_state.orders.iterrows():
-        p_code = order["프로젝트코드"]
-        p_cost = st.session_state.expenses[st.session_state.expenses["프로젝트코드"] == p_code]["지출금액"].sum()
-        p_margin = order["수주금액"] - p_cost
-        margin_rate = (p_margin / order["수주금액"]) * 100 if order["수주금액"] > 0 else 0
+    if not orders_df.empty and not expenses_df.empty:
+        # 금액 데이터 숫자형 변환
+        orders_df["수주금액"] = pd.to_numeric(orders_df["수주금액"], errors='coerce').fillna(0)
+        expenses_df["지출금액"] = pd.to_numeric(expenses_df["지출금액"], errors='coerce').fillna(0)
         
-        p_reports.append({
-            "프로젝트코드": p_code,
-            "발주처": order["발주처"],
-            "수주금액": order["수주금액"],
-            "투입원가(부품+인건)": p_cost,
-            "남은 마진": p_margin,
-            "마진율(%)": f"{margin_rate:.1f}%"
-        })
-    st.dataframe(pd.DataFrame(p_reports), use_container_width=True)
+        total_sales = orders_df["수주금액"].sum()
+        total_expenses = expenses_df["지출금액"].sum()
+        net_profit = total_sales - total_expenses
+        
+        col1, col2, col3 = st.columns(3)
+        col1.metric("총 수주(매출) 금액", f"{total_sales:,.0f} 원")
+        col2.metric("총 매입(지출) 금액", f"{total_expenses:,.0f} 원")
+        col3.metric("당기 순이익", f"{net_profit:,.0f} 원")
+        
+        st.subheader("📋 프로젝트별 원가 및 마진 분석")
+        p_reports = []
+        for _, order in orders_df.iterrows():
+            p_code = order["프로젝트코드"]
+            # 해당 프로젝트의 지출 합산
+            p_cost = expenses_df[expenses_df["프로젝트코드"] == p_code]["지출금액"].sum()
+            p_margin = order["수주금액"] - p_cost
+            margin_rate = (p_margin / order["수주금액"]) * 100 if order["수주금액"] > 0 else 0
+            
+            p_reports.append({
+                "프로젝트코드": p_code,
+                "발주처": order["발주처"],
+                "수주금액": order["수주금액"],
+                "투입원가(부품+인건)": p_cost,
+                "남은 마진": p_margin,
+                "마진율(%)": f"{margin_rate:.1f}%"
+            })
+        st.dataframe(pd.DataFrame(p_reports), use_container_width=True)
+    else:
+        st.info("등록된 수주 또는 지출 데이터가 없어 대시보드를 표시할 수 없습니다. 데이터를 먼저 입력해주세요.")
 
 # ----------------------------------------------------
 # 메뉴 2: 수주/매출 등록 및 관리
@@ -74,16 +88,23 @@ elif menu == "수주/매출 등록 및 관리":
             status = col2.selectbox("진행 상태", ["대기", "제작중", "납품완료", "A/S중"])
             payment = col1.selectbox("수금 여부", ["미수금", "일부수금", "완납"])
             
-            # 수정된 부분! st.form_submit_button 으로 변경
             submit = st.form_submit_button("등록하기")
             
             if submit:
-                new_data = {"프로젝트코드": p_code, "발주처": client, "품목/사양": specs, "수주금액": price, "계약일": order_date, "진행상태": status, "수금여부": payment}
-                st.session_state.orders = pd.concat([st.session_state.orders, pd.DataFrame([new_data])], ignore_index=True)
-                st.success("새로운 수주 건이 등록되었습니다!")
+                if p_code and client:
+                    new_data = pd.DataFrame([{
+                        "프로젝트코드": p_code, "발주처": client, "품목/사양": specs, 
+                        "수주금액": price, "계약일": str(order_date), "진행상태": status, "수금여부": payment
+                    }])
+                    updated_df = pd.concat([orders_df, new_data], ignore_index=True)
+                    conn.update(spreadsheet=URL, worksheet="orders", data=updated_df)
+                    st.success("구글 스프레드시트에 새로운 수주 건이 안전하게 저장되었습니다!")
+                    st.rerun()
+                else:
+                    st.error("프로젝트 코드와 발주처 명은 필수 입력 항목입니다.")
 
-    st.subheader("📑 수주 관리 대장")
-    st.dataframe(st.session_state.orders, use_container_width=True)
+    st.subheader("📑 수주 관리 대장 (실시간 구글 시트 연동)")
+    st.dataframe(orders_df, use_container_width=True)
 
 # ----------------------------------------------------
 # 메뉴 3: 매입/지출 등록 및 관리
@@ -99,16 +120,26 @@ elif menu == "매입/지출 등록 및 관리":
             detail = col1.text_input("상세 지출 내역")
             amount = col2.number_input("지출 금액 (원)", min_value=0, step=1000)
             
-            p_codes = ["공통지출"] + st.session_state.orders["프로젝트코드"].tolist()
+            # 수주된 프로젝트 코드 목록 가져오기
+            p_codes = ["공통지출"]
+            if not orders_df.empty:
+                p_codes += orders_df["프로젝트코드"].dropna().tolist()
             p_match = col1.selectbox("연관 프로젝트 코드 (원가 계산용)", p_codes)
             
-            # 수정된 부분! st.form_submit_button 으로 변경
             submit = st.form_submit_button("등록하기")
             
             if submit:
-                new_expense = {"지출일자": exp_date, "구분": category, "상세내역": detail, "지출금액": amount, "프로젝트코드": p_match}
-                st.session_state.expenses = pd.concat([st.session_state.expenses, pd.DataFrame([new_expense])], ignore_index=True)
-                st.success("지출 내역이 성공적으로 기록되었습니다!")
+                if detail and amount > 0:
+                    new_expense = pd.DataFrame([{
+                        "지출일자": str(exp_date), "구분": category, "상세내역": detail, 
+                        "지출금액": amount, "프로젝트코드": p_match
+                    }])
+                    updated_df = pd.concat([expenses_df, new_expense], ignore_index=True)
+                    conn.update(spreadsheet=URL, worksheet="expenses", data=updated_df)
+                    st.success("구글 스프레드시트에 지출 내역이 안전하게 저장되었습니다!")
+                    st.rerun()
+                else:
+                    st.error("상세 내역을 적고 지출 금액을 입력해주세요.")
 
-    st.subheader("📑 지출/매입 관리 대장")
-    st.dataframe(st.session_state.expenses, use_container_width=True)
+    st.subheader("📑 지출/매입 관리 대장 (실시간 구글 시트 연동)")
+    st.dataframe(expenses_df, use_container_width=True)
